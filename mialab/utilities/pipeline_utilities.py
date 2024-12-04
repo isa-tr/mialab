@@ -30,8 +30,8 @@ def load_atlas_images(directory: str):
 
     global atlas_t1
     global atlas_t2
-    atlas_t1 = sitk.ReadImage(os.path.join(directory, 'mni_icbm152_t1_tal_nlin_sym_09a_mask.nii.gz'))
-    atlas_t2 = sitk.ReadImage(os.path.join(directory, 'mni_icbm152_t2_tal_nlin_sym_09a.nii.gz'))
+    atlas_t1 = sitk.ReadImage(os.path.join(directory, 'mni_icbm152_t1_tal_nlin_sym_09a_mask.nii')) # remove the .gz
+    atlas_t2 = sitk.ReadImage(os.path.join(directory, 'mni_icbm152_t2_tal_nlin_sym_09a.nii')) # remove the .gz
     if not conversion.ImageProperties(atlas_t1) == conversion.ImageProperties(atlas_t2):
         raise ValueError('T1w and T2w atlas images have not the same image properties')
 
@@ -68,7 +68,15 @@ class FeatureExtractor:
             structure.BrainImage: The image with extracted features.
         """
         # todo: add T2w features
-        warnings.warn('No features from T2-weighted image extracted.')
+        #warnings.warn('No features from T2-weighted image extracted.')
+
+        if self.intensity_feature:
+            self.img.feature_images[FeatureImageTypes.T2w_INTENSITY] = self.img.images[structure.BrainImageTypes.T2w]
+
+        if self.gradient_intensity_feature:
+            # compute gradient magnitude images
+            self.img.feature_images[FeatureImageTypes.T2w_GRADIENT_INTENSITY] = \
+                sitk.GradientMagnitude(self.img.images[structure.BrainImageTypes.T2w])
 
         if self.coordinates_feature:
             atlas_coordinates = fltr_feat.AtlasCoordinates()
@@ -209,6 +217,14 @@ def pre_process(id_: str, paths: dict, **kwargs) -> structure.BrainImage:
                               len(pipeline_t1.filters) - 1)
     if kwargs.get('normalization_pre', False):
         pipeline_t1.add_filter(fltr_prep.ImageNormalization())
+    if kwargs.get('resampling_pre', False):
+        pipeline_t1.add_filter(fltr_prep.ImageResampling())
+        resampling_params = {'new_size': (256, 256), 'interpolation': 'bilinear'}
+        pipeline_t1.set_param(resampling_params, len(pipeline_t1.filters) - 1)
+    if kwargs.get('denoising_pre', False):
+        pipeline_t1.add_filter(fltr_prep.ImageDenoising())
+        denoising_params = {'method': 'gaussian', 'sigma': 1.0}
+        pipeline_t1.set_param(denoising_params, len(pipeline_t1.filters) - 1)
 
     # execute pipeline on the T1w image
     img.images[structure.BrainImageTypes.T1w] = pipeline_t1.execute(img.images[structure.BrainImageTypes.T1w])
@@ -225,6 +241,14 @@ def pre_process(id_: str, paths: dict, **kwargs) -> structure.BrainImage:
                               len(pipeline_t2.filters) - 1)
     if kwargs.get('normalization_pre', False):
         pipeline_t2.add_filter(fltr_prep.ImageNormalization())
+    if kwargs.get('resampling_pre', False):
+        pipeline_t2.add_filter(fltr_prep.ImageResampling())
+        resampling_params = {'new_size': (256, 256), 'interpolation': 'bilinear'}
+        pipeline_t2.set_param(resampling_params, len(pipeline_t2.filters) - 1)
+    if kwargs.get('denoising_pre', False):
+        pipeline_t2.add_filter(fltr_prep.ImageDenoising())
+        denoising_params = {'method': 'gaussian', 'sigma': 1.0}
+        pipeline_t2.set_param(denoising_params, len(pipeline_t2.filters) - 1)
 
     # execute pipeline on the T2w image
     img.images[structure.BrainImageTypes.T2w] = pipeline_t2.execute(img.images[structure.BrainImageTypes.T2w])
@@ -288,10 +312,11 @@ def init_evaluator() -> eval_.Evaluator:
         eval.Evaluator: An evaluator.
     """
 
-    # initialize metrics
-    metrics = [metric.DiceCoefficient()]
+    # initialize metrics - here we can add our metrics too
+    metrics = [metric.DiceCoefficient(), metric.HausdorffDistance(percentile=95)]
     # todo: add hausdorff distance, 95th percentile (see metric.HausdorffDistance)
-    warnings.warn('Initialized evaluation with the Dice coefficient. Do you know other suitable metrics?')
+
+    #warnings.warn('Initialized evaluation with the Dice coefficient. Do you know other suitable metrics?')
 
     # define the labels to evaluate
     labels = {1: 'WhiteMatter',
